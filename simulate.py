@@ -4,24 +4,30 @@ import random
 
 class ExtTeam:
     def __init__(self, espn_team):
+        # preexisting values
         self.espn_team = espn_team
-        self.remaining_opponents = []
-        self.playoff_odds = None
-        self.seed = None
-        
         self.wins = espn_team.wins
         self.losses = espn_team.losses
         self.points = espn_team.points_for
+
+        self.existing_wins_vs = {}
+        self.existing_losses_vs = {}
         
         # sim specific variables
         self.final_wins = espn_team.wins
         self.final_losses = espn_team.losses
-        self.wins_vs = {}
-        self.losses_vs = {}
-
+        self.wins_vs = self.existing_wins_vs
+        self.losses_vs = self.existing_losses_vs
         self.h2h_pct = 0
 
-        # self.initialize_sched()
+        # meta variables
+        self.sims_finished_at = {}
+
+    def record_past_result(self, opponent, did_win):
+        if did_win:
+            self.wins_vs[opponent.espn_team.team_id] = self.wins_vs.get(opponent.espn_team.team_id, 0) + 1
+        else:
+            self.losses_vs[opponent.espn_team.team_id] = self.losses_vs.get(opponent.espn_team.team_id, 0) + 1
 
     def record_result(self, opponent, did_win):
         if did_win:
@@ -30,6 +36,13 @@ class ExtTeam:
         else:
             self.final_losses += 1
             self.losses_vs[opponent.espn_team.team_id] = self.losses_vs.get(opponent.espn_team.team_id, 0) + 1
+
+    def reset_sim(self):
+        self.final_wins = self.espn_team.wins
+        self.final_losses = self.espn_team.losses
+        self.wins_vs = self.existing_wins_vs
+        self.losses_vs = self.existing_losses_vs
+        self.h2h_pct = 0
 
     @property
     def name(self):
@@ -83,52 +96,66 @@ def break_ties(tied_teams):
     return final_order
 
 
-def monte_carlo(league, my_teams, iterations=10000):
-    # standings = league.standings()
-    # results = {team: 0 for team in standings}
-    # for _ in range(iterations):
-    # print(f"simulation {i}/{iterations}...\n")
-
-    for i in range(league.current_week, league.settings.reg_season_count + 1):
-        print(f"simulating week {i}...")
+def monte_carlo(league, my_teams, iterations=1000):
+    for i in range(1, league.current_week):
+        print(f"preloading week {i}...")
         matchups = league.scoreboard(i)
         for m in matchups:
-            y = random.randrange(1, 11)
-            if y % 2 == 0:
-                my_teams[m.home_team.team_id - 1].record_result(my_teams[m.away_team.team_id - 1], True)
-                my_teams[m.away_team.team_id - 1].record_result(my_teams[m.home_team.team_id - 1], False)
-                print(f"{m.home_team.team_name} defeats {m.away_team.team_name}")
+            if m.home_score > m.away_score:
+                my_teams[m.home_team.team_id - 1].record_past_result(my_teams[m.away_team.team_id - 1], True)
+                my_teams[m.away_team.team_id - 1].record_past_result(my_teams[m.home_team.team_id - 1], False)
             else:
-                my_teams[m.home_team.team_id - 1].record_result(my_teams[m.away_team.team_id - 1], False)
-                my_teams[m.away_team.team_id - 1].record_result(my_teams[m.home_team.team_id - 1], True)
-                print(f"{m.home_team.team_name} defeats {m.away_team.team_name}")
+                my_teams[m.home_team.team_id - 1].record_past_result(my_teams[m.away_team.team_id - 1], False)
+                my_teams[m.away_team.team_id - 1].record_past_result(my_teams[m.home_team.team_id - 1], True)
+
+    print("\n")
+    for iteration in range(1, iterations + 1):
+        print(f"\rSimulating iteration {iteration} / {iterations}...", end="", flush=True)
+        for i in range(league.current_week, league.settings.reg_season_count + 1):
+            # print(f"simulating week {i}...")
+            matchups = league.scoreboard(i)
+            for m in matchups:
+                y = random.randrange(1, 11)
+                if y % 2 == 0:
+                    my_teams[m.home_team.team_id - 1].record_result(my_teams[m.away_team.team_id - 1], True)
+                    my_teams[m.away_team.team_id - 1].record_result(my_teams[m.home_team.team_id - 1], False)
+                    # print(f"{m.home_team.team_name} defeats {m.away_team.team_name}")
+                else:
+                    my_teams[m.home_team.team_id - 1].record_result(my_teams[m.away_team.team_id - 1], False)
+                    my_teams[m.away_team.team_id - 1].record_result(my_teams[m.home_team.team_id - 1], True)
+                    # print(f"{m.away_team.team_name} defeats {m.home_team.team_name}")
+            # print("\n")
+
+        sorted_teams = sorted(
+            my_teams,
+            key=lambda t: t.final_wins,
+            reverse=True
+        )
+
+        standings = []
+        groups = []
+        for wins, group in groupby(sorted_teams, key=lambda t: t.final_wins):
+            tied_group = list(group)
+            if len(tied_group) == 1:
+                standings.extend(tied_group)
+            else:
+                standings.extend(break_ties(tied_group))
+
+        for i, team in enumerate(standings):
+            team.sims_finished_at[i + 1] = team.sims_finished_at.get(i + 1, 0) + 1
+            team.reset_sim()
+
+    print("\n")
+
+    for team in my_teams:
+        print(f"Data for {team.espn_team.team_name}")
+        print(f"Best possible placing: {min(team.sims_finished_at)}")
+        print(f"Worst possible placing {max(team.sims_finished_at)}")
+        print("Distribution:")
+        team.sims_finished_at = dict(sorted(team.sims_finished_at.items()))
+        for key, value in team.sims_finished_at.items():
+            print(f"{key} --- {value} times")
         print("\n")
-
-    sorted_teams = sorted(
-        my_teams,
-        key=lambda t: t.final_wins,
-        reverse=True
-    )
-
-    standings = []
-    groups = []
-    for wins, group in groupby(sorted_teams, key=lambda t: t.final_wins):
-        tied_group = list(group)
-        if len(tied_group) == 1:
-            standings.extend(tied_group)
-        else:
-            standings.extend(break_ties(tied_group))
-
-    for i, team in enumerate(standings):
-        print(f"{i + 1}//{team.espn_team.team_name}: {team.final_wins} - {team.final_losses} ({round(team.points, 2)})")
-    #     for (a, b), p in zip(matchups):
-    #         winner = a if random.random() < p else b
-    #         s[winner] += 1
-    #     top_teams = sorted(s.items(), key=lambda x: x[1], reverse=True)[:4]
-    #     for team, _ in top_teams:
-    #         results[team] += 1
-    # for team in results:
-    #     results[team] /= iterations
     return
 
 
