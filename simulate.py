@@ -50,6 +50,20 @@ def break_ties(tied_teams):
     return final_order
 
 
+def rank_division(teams):
+    """Rank teams within a division."""
+    # Sort by wins, then apply tiebreakers
+    teams_sorted = sorted(teams, key=lambda t: t.final_wins, reverse=True)
+    ranked = []
+    for wins, group in groupby(teams_sorted, key=lambda t: t.final_wins):
+        group = list(group)
+        if len(group) == 1:
+            ranked.extend(group)
+        else:
+            ranked.extend(break_ties(group))
+    return ranked
+
+
 def monte_carlo(league, my_teams, iterations=1000):
     for i in range(1, league.current_week):
         print(f"preloading week {i}...")
@@ -80,15 +94,31 @@ def monte_carlo(league, my_teams, iterations=1000):
                     # print(f"{m.away_team.team_name} defeats {m.home_team.team_name}")
             # print("\n")
 
+        standings = []
+        
+        divisions = {}
+        for team in my_teams:
+            divisions.setdefault(team.espn_team.division_id, []).append(team)
+
+        winners = []
+        for _, division_teams in divisions.items():
+            ranked = rank_division(division_teams)
+            winners.append(ranked[0])
+            ranked[0].sims_won_division += 1
+            # print(f"{ranked[0].espn_team.division_name} division winner: {ranked[0].espn_team.team_name}")
+        if winners[0].final_wins == winners[1].final_wins:
+            standings.extend(break_ties(winners))
+        else:
+            standings.extend(winners)
+
+        sorted_teams = [t for t in my_teams if t not in winners]
         sorted_teams = sorted(
-            my_teams,
+            sorted_teams,
             key=lambda t: t.final_wins,
             reverse=True
         )
 
-        standings = []
-        groups = []
-        for wins, group in groupby(sorted_teams, key=lambda t: t.final_wins):
+        for _, group in groupby(sorted_teams, key=lambda t: t.final_wins):
             tied_group = list(group)
             if len(tied_group) == 1:
                 standings.extend(tied_group)
@@ -97,7 +127,9 @@ def monte_carlo(league, my_teams, iterations=1000):
 
         for i, team in enumerate(standings):
             team.sims_finished_at[i + 1] = team.sims_finished_at.get(i + 1, 0) + 1
+            # print(f"{i + 1}//{team.espn_team.team_name} ---- {team.final_wins} - {team.final_losses} ({round(team.points, 2)})")
             team.reset_sim()
+
 
     print("\n")
 
@@ -105,6 +137,7 @@ def monte_carlo(league, my_teams, iterations=1000):
         print(f"Data for {team.espn_team.team_name}")
         print(f"Best possible placing: {min(team.sims_finished_at)}")
         print(f"Worst possible placing {max(team.sims_finished_at)}")
+        print(f"Times winning {team.espn_team.division_name} division: {team.sims_won_division}")
         print("Distribution:")
         team.sims_finished_at = dict(sorted(team.sims_finished_at.items()))
         for key, value in team.sims_finished_at.items():

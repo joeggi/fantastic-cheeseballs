@@ -18,6 +18,7 @@ class ExtTeam:
 
         # meta variables
         self.sims_finished_at = {}
+        self.sims_won_division = 0
 
     def record_past_result(self, opponent, did_win):
         if did_win:
