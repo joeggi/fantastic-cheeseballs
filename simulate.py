@@ -3,7 +3,7 @@ from itertools import groupby
 import random
 from ext_team import ExtTeam
     
-def break_ties(tied_teams):
+def break_ties(tied_teams, h2h):
     final_order = []
 
     remaining = tied_teams.copy()
@@ -25,8 +25,8 @@ def break_ties(tied_teams):
             game_counts.append(wins + losses)
             h2h_records[team] = (wins, losses)
         
-        # they have all played the same non-zero number of times
-        if len(set(game_counts)) == 1 and game_counts[0] > 0:    
+        # they have all played the same non-zero number of times and league uses h2h tiebreakers
+        if len(set(game_counts)) == 1 and game_counts[0] > 0 and h2h:    
             for team, (wins, losses) in h2h_records.items():
                 team.h2h_pct = wins / (wins + losses) if (wins + losses) > 0 else 0
 
@@ -50,7 +50,7 @@ def break_ties(tied_teams):
     return final_order
 
 
-def rank_division(teams):
+def rank_division(teams, h2h):
     """Rank teams within a division."""
     # Sort by wins, then apply tiebreakers
     teams_sorted = sorted(teams, key=lambda t: t.final_wins, reverse=True)
@@ -60,11 +60,11 @@ def rank_division(teams):
         if len(group) == 1:
             ranked.extend(group)
         else:
-            ranked.extend(break_ties(group))
+            ranked.extend(break_ties(group, h2h))
     return ranked
 
 
-def monte_carlo(league, my_teams, iterations=10):
+def monte_carlo(league, my_teams, h2h, iterations=1000):
     for i in range(1, league.current_week):
         print(f"preloading week {i}...")
         matchups = league.scoreboard(i)
@@ -102,13 +102,13 @@ def monte_carlo(league, my_teams, iterations=10):
 
         winners = []
         for _, division_teams in divisions.items():
-            ranked = rank_division(division_teams)
+            ranked = rank_division(division_teams, h2h)
             winners.append(ranked[0])
             ranked[0].sims_won_division += 1
             # print(f"{ranked[0].espn_team.division_name} division winner: {ranked[0].espn_team.team_name}")
         if len(winners) == 2:
             if winners[0].final_wins == winners[1].final_wins:
-                standings.extend(break_ties(winners))
+                standings.extend(break_ties(winners, h2h))
             else:
                 standings.extend(winners)
         else:
@@ -126,7 +126,7 @@ def monte_carlo(league, my_teams, iterations=10):
             if len(tied_group) == 1:
                 standings.extend(tied_group)
             else:
-                standings.extend(break_ties(tied_group))
+                standings.extend(break_ties(tied_group, h2h))
 
         for i, team in enumerate(standings):
             team.sims_finished_at[i + 1] = team.sims_finished_at.get(i + 1, 0) + 1
@@ -154,4 +154,4 @@ if __name__ == '__main__':
 
     my_teams = [ExtTeam(team) for team in league.teams]
 
-    monte_carlo(league, my_teams)
+    monte_carlo(league, my_teams, True)
